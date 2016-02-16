@@ -17,11 +17,13 @@
 import hashlib
 import os
 import sys
-import syslog
 import urllib
 
 import boto3
+import botocore
 from configobj import ConfigObj
+
+import syslog
 
 
 class APTMessage:
@@ -57,7 +59,6 @@ class S3Method:
         secret_key = config['SecretAccessKey']
         self.session = boto3.session.Session(aws_access_key_id=access_key,
                                              aws_secret_access_key=secret_key)
-        self.s3 = self.session.resource('s3')
         self.send_capabilities()
 
     def __load_config(self):
@@ -147,25 +148,46 @@ class S3Method:
         syslog.syslog(str(msg))
         self.uri = msg['URI']
         self.uri_parsed = urllib.parse.urlparse(self.uri)
-        bucket = self.uri_parsed.netloc
-        key = self.uri_parsed.path[1:]
         self.filename = msg['Filename']
+
+        #Get region name
+        pos = self.uri_parsed.netloc.find(".s3")
+        if pos >= 0:
+            region_name = self.uri_parsed.netloc[:pos]
+        else:
+            region_name = None
+
+        self.s3 = self.session.resource("s3", region_name=region_name)
+
+        #Get bucket name
+        path = self.uri_parsed.path
+        if path[0] == "/":
+            path = path[1:]
+
+        pos = path.find("/")
+        if pos >= 0:
+            bucket = path[:pos]
+            key = path[pos + 1:]
+        else:
+            raise Exception("Path is empty")
 
         obj = self.s3.Object(bucket, key)
         self.send_status({'URI': self.uri, 'Message': 'Waiting for headers'})
         try:
             obj.load()
-        except Exception as e:
+        except botocore.exceptions.ClientError as e:
             self.send_uri_failure({
                 'URI': self.uri,
                 'Message': str(e),
-                'FailReason': str(e.response)})
+                'FailReason': str(e.response)
+            })
             return
 
         self.send_uri_start({
             'URI': self.uri,
             'Size': obj.content_length,
-            'Last-Modified': obj.last_modified})
+            'Last-Modified': obj.last_modified
+        })
 
         obj.download_file(self.filename)
 
@@ -193,7 +215,9 @@ class S3Method:
             'MD5-Hash': hash_md5.hexdigest(),
             'MD5Sum-Hash': hash_md5.hexdigest(),
             'SHA256-Hash': hash_sha256.hexdigest(),
-            'SHA512-Hash': hash_sha512.hexdigest()})
+            'SHA512-Hash': hash_sha512.hexdigest()
+        })
+
 
 if __name__ == '__main__':
     try:
