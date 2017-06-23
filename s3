@@ -55,10 +55,13 @@ class S3Method:
     def __init__(self):
         config = self.__load_config()
 
-        access_key = config['AccessKeyId']
-        secret_key = config['SecretAccessKey']
-        self.session = boto3.session.Session(aws_access_key_id=access_key,
-                                             aws_secret_access_key=secret_key)
+        if 'AccessKeyId' in config:
+            access_key = config['AccessKeyId']
+            secret_key = config['SecretAccessKey']
+            self.session = boto3.session.Session(aws_access_key_id=access_key,
+                                                 aws_secret_access_key=secret_key)
+        else:
+            self.session = boto3.session.Session()
         self.send_capabilities()
 
     def __load_config(self):
@@ -77,7 +80,7 @@ class S3Method:
             return config
         else:
             syslog.syslog("Config file: %s doesn't exist" % _CONF_FILE)
-            raise Exception("Config file: %s doesn't exist" % _CONF_FILE)
+            return {}
 
     def fail(self, message='Failed'):
         self.send_uri_failure({'URI': self.uri, 'Message': message})
